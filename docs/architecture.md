@@ -111,7 +111,7 @@ the line is: if it helps the companion know the user better, store it. if it's o
 
 ## how corrections work
 
-this is the part the assignment cares about most, so i'll walk through the exact mechanics for each of the six cases they gave us.
+this is the part the assignment cares about most, so i'll walk through the exact mechanics for each of the six cases provided.
 
 **"Rocky school mein tha, ab se Daredevil yaad rakhna"**
 find the fact where `entity=self, predicate=nickname, value=Rocky`. set its `status=corrected`. create a new fact: `predicate=nickname, value=Daredevil, supersedes=old_fact_id`. the chain preserves history — Rocky existed, Daredevil replaced it.
