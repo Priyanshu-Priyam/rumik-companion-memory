@@ -1,0 +1,42 @@
+{
+  "rohan": {
+    "user_id": "rohan",
+    "name": "Rohan",
+    "age": 22,
+    "gender": "male",
+    "city": "Delhi",
+    "occupation": "college student",
+    "language": "Hinglish",
+    "description": "22-year-old college student from Delhi. Speaks Hinglish. Has girlfriend Divya (was crush), pet hamster Spark, pet rat Pixel, nickname Daredevil (was Rocky), weight 88kg (was 110), friends Rakesh and Arjun (basketball captain). Correction-heavy test profile."
+  },
+  "meera": {
+    "user_id": "meera",
+    "name": "Meera",
+    "age": 28,
+    "gender": "female",
+    "city": "Bangalore",
+    "occupation": "working professional",
+    "language": "Hinglish",
+    "description": "28-year-old working professional in Bangalore. Handling a large campaign at work. Evening routine: green tea + makhana (was tea + burger). Dadaji was army veteran with service number IC-14829. Strained relationship with mother."
+  },
+  "priya": {
+    "user_id": "priya",
+    "name": "Priya",
+    "age": 19,
+    "gender": "female",
+    "city": "unknown",
+    "occupation": "first-year college student",
+    "language": "Hinglish",
+    "description": "19-year-old first-year college student. In a long-distance relationship with Aarav. Has health anxiety, shared self-harm ideation once. Family financial stress. Younger sister in school. Roommate Nisha. Sensitive disclosure profile."
+  },
+  "testuser_b": {
+    "user_id": "testuser_b",
+    "name": "TestUser_B",
+    "age": null,
+    "gender": null,
+    "city": null,
+    "occupation": null,
+    "language": "Hinglish",
+    "description": "Minimal profile used exclusively for multi-user isolation testing. Memory should be empty — no data from other users should leak into this profile."
+  }
+}

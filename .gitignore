@@ -1,0 +1,12 @@
+data/
+.env
+__pycache__/
+*.pyc
+*.db
+chroma/
+.streamlit/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.cursor/
