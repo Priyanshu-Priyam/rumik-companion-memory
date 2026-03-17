@@ -1,90 +1,82 @@
 # Problem Framing
 
-## What Is Broken
+## what's actually broken
 
-AI companion products like Ira deliver strong *in-the-moment* conversational warmth but fail at **reliability across time**. The core promise of a companion — "I know you, I remember you, I grow with you" — breaks down in predictable, product-critical ways:
+i spent about 120 minutes talking to Ira before writing any code. called her up, shared my life story, tested corrections, pushed boundaries, deliberately contradicted myself. i wanted to understand what fails before deciding what to build.
 
-### Memory Failures
+the short version: Ira's short-term memory within a session is decent. she remembered my friends' names, where Friend 1's wedding was, that Friend 2 works at Marriott. the factual memory works. what doesn't work is everything that makes a companion feel like a companion.
 
-1. **Long-term memory misses**: The companion forgets facts the user explicitly shared weeks ago. A user says "mera dog ka naam Spark hai" and two days later the system asks "tumhara koi pet hai?"
+### the conversation doesn't feel like a conversation
 
-2. **Fabricated recall**: Rather than admitting a gap, the system invents plausible-sounding but false memories. This is the single most trust-destroying behavior — it gaslights the user.
+i gave Ira a detailed 2.5-minute introduction — childhood, cities, startups, career. her response: "accha theek hai, aur batao." that's it. no follow-up on anything specific. no curiosity. a friend would've grabbed onto something — the startup that got acquired, the city i grew up in, anything. Ira treated it as data ingestion and moved on.
 
-3. **Relationship-state mistakes**: A girlfriend gets called a "crush" because the correction wasn't persisted. A friend who changed roles is still referenced by the old title. The system doesn't track entity evolution.
+worse, she pre-batches questions. i noticed she decides upfront what to ask, then goes through them in order regardless of what i say in between. i was talking about Gorakhpur and she jumped to "how was Dehradun?" — completely ignoring the active thread. later, i'd already said Deathly Hallows was my favorite Harry Potter movie. her next question: "what's your favorite Harry Potter movie?" 
 
-4. **Generic filler as a substitute for recall**: When the system can't retrieve a fact, it responds with deflective warmth ("Tell me more about that!") instead of direct recall or honest admission. Users notice this pattern quickly.
+she also can't take the lead. when i said "tum bolo" she responded with "kya hum aage baat kar sakte hain?" — a meta-statement about the conversation rather than actual content. a companion that can only respond but never initiate is not a companion, it felt more like a customer support bot with a friendly voice.
 
-### Correction Failures
+### corrections don't persist
 
-5. **Poor correction handling**: When a user says "Spark mera rat nahi hai, Spark hamster hai," naive systems either ignore the correction entirely or create a contradictory state where Spark is both rat and hamster.
+this one's a dealbreaker. i explicitly told Ira three things: stop greeting me with "are tum phir se aa gaye," you should've asked about Gorakhpur not Dehradun, and don't ask those pre-batched questions. she acknowledged each one — "mujhe afsoos hai, agali baar dhyan rakhungi" — and then did the exact same thing on the next call. three times. this is worse than forgetting. it's performative acknowledgment with zero follow-through.
 
-6. **No temporal awareness**: The system can't distinguish between "weight was 110 kg" (past) and "weight is 88 kg" (current). It mixes historical and current values.
+### contradiction detection doesn't exist
 
-### Trust Failures
+i deliberately told her i was born, raised, and lived my entire life in Bangalore — after spending 10 minutes talking about growing up in Gorakhpur and studying in Dehradun. she accepted it without blinking. when i pushed — "if i've always lived in Bangalore, how did i study in Dehradun?" — she just repeated both statements as independently true. no consistency check, no flag, nothing. user's verdict, my verdict: "it has completely broken down now."
 
-7. **Temporal hallucination**: The system guesses the current time, date, or duration. It says "last time we spoke was 3 days ago" when it has no access to timestamps.
+### what actually worked
 
-8. **Inconsistent post-conflict continuity**: After an emotional exchange or conflict, the system resets to a neutral tone as if nothing happened. The user vented about their girlfriend, went to sleep angry, and the next day the system greets them with generic cheerfulness.
-
-9. **Sensitive memory dumping**: The system brings up a user's health anxiety, financial stress, or past self-harm ideation in casual conversation without being prompted. No restraint policy.
-
-### Evaluation Failures
-
-10. **Weak evaluation layers**: Most systems rely on vibe-based testing — "does this response *feel* right?" — rather than structured, reproducible evaluation. Regressions go undetected. Cherry-picked demos mask systematic failures.
+voice quality is good. extremely good. truly sota. short-term factual recall works. she correctly handled a name swap correction within the session. she knows Mahoba is in Bundelkhand. and she maintained romantic boundaries consistently across 5+ escalation attempts — warm but firm. these are great positives.
 
 ---
 
-## What Is Product-Critical
+## what's product-critical
 
-Not all failures are equal. From a product perspective, these are ranked by **trust destruction velocity** — how quickly they make a user stop trusting the companion:
+not every failure matters equally. i rank them by trust destruction velocity — how fast they make someone stop trusting the companion.
 
-| Priority | Failure Mode | Trust Impact |
+| priority | failure | why it's critical |
 |---|---|---|
-| P0 | Fabricated recall (gaslight) | Instant trust destruction |
-| P0 | Cross-user memory leak | Privacy violation, legal risk |
-| P0 | Sensitive memory dumping | Emotional harm |
-| P1 | Correction not persisted | Repeated frustration |
-| P1 | Direct recall miss | Feels like the system doesn't care |
-| P2 | Generic filler | Feels scripted, not genuine |
-| P2 | Post-conflict amnesia | Feels like talking to a stranger |
-| P3 | Temporal hallucination | Undermines factual trust |
+| P0 | fabricated recall | gaslighting. instant trust death. |
+| P0 | cross-user memory leak | privacy violation. legal liability. |
+| P0 | sensitive memory dumping | emotional harm. user shared something vulnerable and the system throws it back unprompted. |
+| P1 | correction not persisted | "i already told you this" is the fastest way to make someone feel unheard. |
+| P1 | direct recall miss | the system doesn't care enough to remember. |
+| P2 | generic filler ("aur batao?") | feels scripted. the mask slips. |
+| P2 | post-conflict amnesia | feels like talking to a stranger who forgot yesterday happened. |
+| P3 | temporal hallucination | guessing the time/date. undermines factual credibility. |
 
-The first three are **non-negotiable**. A companion that fabricates memories, leaks private data across users, or surfaces intimate disclosures unprompted is not shippable — regardless of how warm its tone is.
+the first three are non-negotiable. a companion that fabricates memories, leaks user data across profiles, or dumps intimate context in casual conversation is not shippable. i don't care how warm the voice sounds.
 
 ---
 
-## What "Best-in-Class Companion Quality" Means Operationally
+## what "best-in-class" actually means
 
-Best-in-class is not about being the most expressive or the most human-sounding. It is about being **reliably trustworthy while remaining warm**.
+best-in-class is not about sounding the most human or being the most expressive. it's about being reliably trustworthy while remaining warm.
 
-### Operational Definition
+a best-in-class companion:
 
-A best-in-class companion:
+1. **recalls directly** when it has the information. no hedging, no filler, no re-asking what it already knows.
 
-1. **Recalls directly** when it has the information — no hedging, no filler, no re-asking what it already knows.
+2. **admits honestly** when it doesn't know. "yaar, ye mujhe yaad nahi hai, bata na?" is better than "tell me more about that!" — the first is honest warmth, the second is deflection wearing warmth as a costume.
 
-2. **Admits honestly** when it doesn't know something — with warmth, not coldness. "Yaar, ye mujhe yaad nahi hai, bata na?" is better than "Tell me more about that!"
+3. **never fabricates.** silence is better than a lie. always.
 
-3. **Never fabricates** — no invented details, no confident-sounding guesses, no filled-in gaps. Silence is better than a lie.
+4. **handles corrections as first-class operations.** supersession, not overwrite. old facts stay as history, new facts become current, entity disambiguation is explicit. "Spark mera rat nahi hai, hamster hai" should create two clean records, not a contradictory mess.
 
-4. **Handles corrections as first-class operations** — supersession, not overwrite. Old facts are marked historical, new facts are current, entity disambiguation is handled.
+5. **respects sensitivity.** knows when to recall directly, when to summarize, when to ask before revealing, and when to stay silent. matches disclosure to conversational context.
 
-5. **Respects sensitivity** — knows when to recall directly, when to summarize, when to ask before revealing, and when to stay silent. Matches disclosure level to conversational context.
+6. **maintains continuity.** emotional context, conflict history, relationship evolution — they carry forward. no amnesiac resets between sessions.
 
-6. **Maintains continuity** — emotional context, conflict history, and relationship evolution carry forward. No amnesiac resets between sessions.
+7. **isolates perfectly.** user A's girlfriend's name never shows up in user B's session. ever.
 
-7. **Isolates perfectly** — zero cross-user contamination. User A's girlfriend's name never appears in User B's session.
+### the numbers i'm targeting
 
-### Target Quality Bar
-
-| Metric | Target |
+| metric | target |
 |---|---|
-| Critical honesty cases | 100% |
-| Multi-user isolation | 100% |
-| Fabricated memories | 0 |
-| Live-time hallucinations | 0 |
-| Direct recall success | 90%+ |
-| Correction success | 90%+ |
-| Relationship-state accuracy | 85%+ |
+| critical honesty cases | 100% |
+| multi-user isolation | 100% |
+| fabricated memories | 0 |
+| live-time hallucinations | 0 |
+| direct recall success | 90%+ |
+| correction success | 90%+ |
+| relationship-state accuracy | 85%+ |
 
-These numbers are the floor, not the ceiling. The aspiration is a system where users feel genuinely known — not performed at.
+

@@ -1,157 +1,143 @@
 # Production Thinking
 
-This covers how the memory-augmented companion system would behave in production, with real users, real latency budgets, and real privacy requirements.
 
----
 
-## Latency
+## latency
 
-**Current system budget** (per message):
+every message in Brain B goes through: extraction → write to store → retrieve → rank → build prompt → generate. two LLM calls (extraction + generation), two DB operations (SQLite + ChromaDB). the current p50 budget looks like this:
 
-| Stage | Expected p50 | Expected p95 | Notes |
+| stage | p50 | p95 | notes |
 |---|---|---|---|
-| Extraction (write phase) | 300ms | 600ms | Single LLM call to parse user message for facts |
-| Memory store write | 5ms | 15ms | SQLite insert/update |
-| Vector store write | 20ms | 50ms | ChromaDB upsert |
-| Hybrid retrieval | 25ms | 60ms | SQLite keyword + ChromaDB ANN in parallel |
-| Ranking | 2ms | 5ms | In-memory scoring |
-| Policy application | <1ms | <1ms | Pure logic, no I/O |
-| Prompt construction | <1ms | <1ms | String formatting |
-| Response generation | 500ms | 1200ms | LLM generation call |
-| **Total** | **~850ms** | **~1900ms** | |
+| extraction (write phase) | 300ms | 600ms | single LLM call |
+| memory store write | 5ms | 15ms | SQLite insert/update |
+| vector store write | 20ms | 50ms | ChromaDB upsert |
+| hybrid retrieval | 25ms | 60ms | SQLite + ChromaDB in parallel |
+| ranking | 2ms | 5ms | in-memory scoring |
+| policy application | <1ms | <1ms | pure logic |
+| prompt construction | <1ms | <1ms | string formatting |
+| response generation | 500ms | 1200ms | LLM generation call |
+| **total** | **~850ms** | **~1900ms** | |
 
-The extraction call is the critical latency concern. In production, two strategies:
+the extraction call is the latency problem. it adds 300-600ms to every turn — and most messages don't contain new facts worth extracting. someone saying "haha sahi bol raha hai" doesn't need a fact extraction call. the extraction budget is being spent on turns that return empty arrays.
 
-1. **Fire-and-forget extraction**: Run extraction asynchronously after sending the response. The user gets a reply in ~500ms, and the memory update happens in the background. The next turn picks it up. This trades one-turn-delayed memory for halved latency.
+two practical fixes:
 
-2. **Batch extraction**: Extract facts from the last N turns every K messages rather than every turn. Reduces LLM calls by 60-80% while keeping memory fresh enough for most use cases.
+**fire-and-forget extraction** — send the response first, run extraction asynchronously. user gets a reply in ~500ms. memory updates land before the next turn. the cost is one-turn-delayed memory for anything important said in the current message. acceptable for most conversations, not acceptable if the user just shared something they expect to be recalled in the same turn.
 
-For the read path (retrieval → generation), the bottleneck is the single LLM generation call. ChromaDB retrieval at <100K facts per user is sub-50ms. SQLite queries are sub-10ms. The system is I/O-bound on LLM inference, not on memory operations.
+**selective extraction** — run a cheap intent classifier first (a single Haiku call). 
+if the message looks like a factual disclosure, extract. if it looks like a reaction or filler, skip. this cuts extraction calls by 60-70% without meaningful memory loss.
+
+for the read path, the bottleneck is the generation call. ChromaDB retrieval at <100K facts per user is sub-50ms. SQLite queries are sub-10ms. the system is LLM-inference-bound, not memory-bound. that changes when the fact DAG ships — graph traversal over a large fact store adds meaningful DB time — but at current scale it's not the constraint.
 
 ---
 
-## Cost
+## cost
 
-**Per-message cost breakdown** (Claude Sonnet at current Bedrock pricing):
+every message runs two LLM calls. at Bedrock Sonnet pricing:
 
-| Component | Input tokens (est.) | Output tokens (est.) | Cost per message |
+| component | input tokens (est.) | output tokens (est.) | cost per message |
 |---|---|---|---|
-| Extraction call | ~800 | ~200 | ~$0.004 |
-| Response generation | ~1500 (prompt + history + facts) | ~300 | ~$0.008 |
-| LLM judge (eval only) | ~1200 | ~150 | ~$0.005 |
-| **Total per message** | | | **~$0.012** |
+| extraction call | ~800 | ~200 | ~$0.004 |
+| response generation | ~1500 | ~300 | ~$0.008 |
+| **total per message** | | | **~$0.012** |
 
-At 50 messages/day per active user: ~$0.60/user/day, ~$18/user/month.
+at 50 messages/day per active user, that's ~$0.60/user/day, ~$18/user/month. that's a lot for a companion app where the value proposition is daily engagement over months.
 
-**Cost reduction levers**:
+the levers:
 
-- **Smaller model for extraction**: Use Haiku for fact extraction (simpler structured output task), Sonnet for generation. Saves ~60% on extraction costs.
-- **Caching**: Cache the system prompt skeleton and user fact block. Bedrock prompt caching can reduce input token costs by 80% for repeated prompt prefixes.
-- **Async extraction batching**: Extract every 3-5 turns instead of every turn. Saves 60-80% on extraction costs.
-- **Tiered generation**: Use Haiku for simple acknowledgments ("accha", "okay"), Sonnet for complex queries requiring memory recall. An intent classifier (also Haiku) routes messages. Potential 40-50% overall cost reduction.
+**model tiering** — use Haiku for extraction (structured output task, doesn't need Sonnet's reasoning quality) and Sonnet for generation. Haiku costs ~5x less. extraction is ~30% of total cost. switching extraction to Haiku cuts that slice by ~80%, reducing total cost by ~25%.
 
----
+**prompt caching** — the system prompt is mostly stable across turns for a given user: persona instructions + memory block. Bedrock prompt caching reduces input token costs by 80% for repeated prompt prefixes. the companion persona and static memory block are the perfect candidates. the only dynamic part is the retrieved facts for each turn, which is a small fraction of the full prompt.
 
-## Scale
+**tiered generation** — route simple responses (acknowledgments, one-word reactions, "accha okay") to Haiku and complex memory-recall or correction queries to Sonnet. an intent classifier (another Haiku call) adds ~$0.001 but saves ~$0.006 on generation for the 40-50% of turns that are simple. net saving: ~25-30% on generation costs.
 
-**Per-user storage**:
+**batched extraction** — extract every 3-5 turns instead of every turn. memory freshness drops slightly but cost drops significantly. most conversational exchanges across 3 turns produce 0-1 new facts anyway.
 
-| Store | Size per user (1K facts) | Notes |
-|---|---|---|
-| SQLite (facts + entities) | ~100KB | Grows linearly with fact count |
-| ChromaDB (embeddings) | ~4MB | 384-dim embeddings, grows linearly |
-| Conversation history (if stored) | ~500KB/month | At 50 messages/day |
-
-**Scaling architecture**:
-
-- **SQLite → PostgreSQL**: At ~10K users, migrate from per-user SQLite files to a shared PostgreSQL instance with user_id partitioning. The schema is already designed for this — every query is scoped by `user_id`.
-- **ChromaDB → Managed vector DB**: At scale, move to Pinecone, Weaviate, or pgvector (to stay in PostgreSQL). Namespace per user. The `VectorStore` abstraction already supports this swap — it exposes `add_fact`, `query`, `remove_user`.
-- **Horizontal scaling**: The memory pipeline is stateless per-request (reads from DB, writes to DB). Multiple API servers can serve requests concurrently. The only coordination needed is write-before-read ordering within a single user's message processing.
-- **Rate limiting**: Per-user rate limits prevent abuse. Token counting (already implemented via tiktoken) enables per-user cost caps.
+combined, these bring cost down to ~$5-8/user/month — roughly in line with what a consumer companion product can support at mid-tier pricing.
 
 ---
 
-## Observability
+## scale
 
-**What to monitor**:
+the current stack (SQLite + ChromaDB on local disk) is intentionally simple. it's the right choice for a prototype and a submission. but the migration path matters.
 
-1. **Retrieval quality metrics**:
-   - Average retrieval score per query (trending down = embedding drift or fact staleness)
-   - Number of facts retrieved vs. facts used in response (high ratio = retrieval is noisy)
-   - Queries with zero retrievals (potential memory gaps)
+**per-user storage** at 1K facts:
+- SQLite (facts + entities): ~100KB
+- ChromaDB (384-dim embeddings): ~4MB
+- grows linearly with fact count
 
-2. **Memory health metrics**:
-   - Facts per user (distribution, growth rate)
-   - Correction chain length (long chains = confused memory)
-   - Stale fact ratio (facts with `valid_until` in the past that haven't been cleaned up)
-   - Extraction failure rate (LLM returns unparseable JSON)
+the schema was built for this migration. every table has `user_id` as a partition key. every query is scoped by `user_id`. moving to PostgreSQL at ~10K users is a schema-compatible migration — no application code changes, just a connection string swap and an index on `user_id`. the `MemoryStore` abstraction already handles this.
 
-3. **Response quality signals**:
-   - User satisfaction proxies: message length trending down, session length trending down, explicit negative feedback
-   - Fabrication detection: flag responses where the LLM mentions facts not in the retrieved set (post-hoc audit)
-   - Sensitivity leak audit: log when high/intimate facts appear in responses
+ChromaDB → managed vector DB (Pinecone, Weaviate, or pgvector if staying in PostgreSQL) is also a clean swap. the `VectorStore` class exposes `add_fact`, `query`, `remove_user`. the internals are hidden. at scale, you swap the implementation, not the interface.
 
-4. **System health**:
-   - LLM call latency (p50, p95, p99)
-   - Bedrock throttle/retry rates
-   - Memory store write latency
-   - Error rates per pipeline stage
+horizontal scaling is straightforward. the memory pipeline is stateless per-request — it reads from DB, writes to DB, and produces a response. multiple API servers can serve concurrent requests without coordination. the only constraint is write-before-read ordering within a single user's message: extraction must settle before retrieval serves the response. that's enforced within the request lifecycle, not across servers.
 
-**Implementation**: Each pipeline stage in `ImprovedEngine.chat()` already returns structured debug data (retrieved facts, extractions, manager actions, withheld count). In production, this would feed into a structured logging pipeline (e.g., CloudWatch Structured Logs or Datadog) with dashboards for the metrics above.
+the fact DAG (the branching model from the architecture doc) adds one consideration at scale: graph traversal queries become more expensive as the fact graph grows deep. the `fact_edges` table will need indexes on `from_fact_id` and `to_fact_id`, and traversal depth should be bounded. not a blocking problem — just something to plan for when the DAG ships.
 
 ---
 
-## Rollback Strategy
+## observability
 
-**What can go wrong and how to recover**:
+the debug data is already there. every message through Brain B returns a structured dict: extracted facts, extraction errors, retrieval scores, manager actions, withheld count, policy decisions, system prompt. in production, this feeds a structured logging pipeline.
 
-1. **Bad extraction model update**: A new extraction model starts misinterpreting facts (e.g., marking corrections as new facts).
-   - **Detection**: Monitor correction chain creation rate. Sudden spike = extraction regression.
-   - **Rollback**: The extraction model is specified by `model_id` in config. Revert to previous model ID. Facts extracted by the bad model can be identified by `conversation_id` range and cleaned up.
+what i'd monitor:
 
-2. **Corrupted fact store**: A bug writes malformed facts or breaks supersession chains.
-   - **Detection**: Integrity checks on supersession chains (no cycles, all referenced facts exist).
-   - **Rollback**: Every fact has a `created_at` timestamp. Facts created after the corruption event can be reverted. The SQLite WAL (write-ahead log) provides point-in-time recovery for recent corruption.
+**retrieval health** — average retrieval score per query (trending down = embedding drift or fact staleness), facts retrieved vs facts the LLM actually references in the response (high ratio = noisy retrieval), queries returning zero facts (potential memory gaps). retrieval is the first place things go wrong silently.
 
-3. **Policy regression**: A prompt change causes the companion to leak sensitive information.
-   - **Detection**: Post-hoc audit comparing responses against sensitive fact set.
-   - **Rollback**: Prompt templates are versioned. Revert to previous template. The policy layer is pure code (no learned parameters), so rollback is instantaneous.
+**memory health** — facts per user (distribution + growth rate), correction chain length (long chains signal confused memory — a user who's been correcting the same fact repeatedly has a problem we haven't solved), stale fact ratio (facts past `valid_until` that haven't been cleaned up), extraction failure rate (LLM returned unparseable JSON).
 
-4. **Full system rollback**: Brain B is performing worse than Brain A in production.
-   - **Strategy**: The `CompanionBrain` interface allows hot-swapping between Brain A and Brain B per user. A/B testing with gradual rollout. If Brain B regresses, switch affected users back to Brain A without data loss — Brain A doesn't use the structured memory store, so it's independent.
+**response quality signals** — session length trending down is the canary. users who find the companion useful come back. users who feel unheard or gaslighted drop off. explicit negative feedback ("ye galat hai," "tune mujhe yeh kabhi nahi bola") is the clearest signal, but it requires the companion to recognize and log it. fabrication audit — flag responses where the LLM mentions something not in the retrieved fact set — catches the hardest failures that users might not explicitly complain about.
+
+**sensitivity audit** — log when high or intimate facts appear in responses, tagged with whether the user explicitly asked for them. this is the one observability gap that has regulatory implications, not just product implications.
 
 ---
 
-## Privacy and Deletion
+## rollback
 
-**Data stored per user**:
+four things that can go wrong in production, and how to recover:
 
-- Entities (name, aliases, type) — in SQLite, partitioned by `user_id`
-- Facts (predicates, values, metadata) — in SQLite, partitioned by `user_id`
-- Fact embeddings — in ChromaDB, filtered by `user_id` metadata
-- Conversation history — in session state (not persisted in current implementation)
+**bad extraction model update** — a new model version starts misinterpreting facts. corrections are stored as new facts, creating contradictory states. detection: monitor correction chain creation rate. sudden spike = extraction regression. rollback: `BEDROCK_MODEL_ID` is a config value. revert it. facts extracted by the bad model are identifiable by `conversation_id` range and can be cleaned up or soft-deleted.
 
-**Deletion implementation** (already built):
+**corrupted fact store** — a bug writes malformed facts or breaks supersession chains. detection: integrity checks on supersession chains (no cycles, all referenced facts exist). these can run as a background job. rollback: every fact has `created_at`. facts after the corruption event can be reverted. SQLite's write-ahead log provides point-in-time recovery for recent windows.
+
+**policy regression** — a prompt change causes sensitive information to surface unprompted. detection: post-hoc audit comparing responses against the user's sensitive fact set. rollback: prompt templates are versioned in the codebase. revert the commit. the policy layer is pure code with no learned parameters — rollback is instantaneous.
+
+**brain regression** — Brain B performs worse than Brain A for a cohort of users. the `CompanionBrain` interface was built for exactly this. A/B testing is structural: both brains are registered, traffic splits by user ID, rollback is a config change. Brain A doesn't use the structured memory store, so switching back doesn't corrupt anything. the stores persist for when Brain B resumes.
+
+---
+
+## privacy and deletion
+
+the data we store per user: entities (name, type, aliases), facts (predicates, values, full metadata), fact embeddings. no conversation transcripts — those exist in session state and aren't persisted.
+
+full deletion is a single call:
 
 ```python
-# Full user deletion — single call
 brain.reset(user_id="rohan")
-
-# This calls:
-# 1. MemoryStore.clear_user(user_id) → DELETE FROM facts/entities WHERE user_id = ?
-# 2. VectorStore.remove_user(user_id) → ChromaDB delete with user_id filter
+# DELETE FROM facts/entities WHERE user_id = ?
+# ChromaDB delete with user_id metadata filter
 ```
 
-Both stores support complete, immediate deletion by `user_id`. No orphaned embeddings, no leftover fact references.
+both stores support immediate, complete deletion. no orphaned embeddings, no leftover fact references. this is a design constraint i kept from the start — multi-user isolation has to be architectural, not just a filter. it means deletion is clean by construction.
 
-**Privacy principles**:
+five principles i held to:
 
-1. **User isolation is architectural**: Every query, every write, every retrieval is scoped by `user_id`. There is no code path that can access another user's data. This is enforced at the storage layer (SQL WHERE clauses, ChromaDB metadata filters), not just the application layer.
+**isolation is structural** — every query, every write, every retrieval is scoped by `user_id` at the storage layer. SQL WHERE clauses, ChromaDB metadata filters. there is no code path that can access another user's data. a bug in the application layer can't produce a cross-user leak because the store won't return it.
 
-2. **Sensitivity is metadata**: Facts have a `sensitivity` field (`none`, `moderate`, `high`, `intimate`) that controls disclosure policy. This is separate from storage — sensitive facts are stored (the user shared them and wants the companion to remember) but gated from unprompted disclosure.
+**sensitivity is metadata, not exclusion** — sensitive facts are stored. the user shared them and wants to be known. the sensitivity field (`none`, `moderate`, `high`, `intimate`) controls disclosure policy at retrieval time, not storage time. storing the fact but gating its disclosure is the correct model. deleting it means the companion forgets something the user chose to share, which is its own kind of failure.
 
-3. **No training on user data**: The system uses a frozen LLM via API. User facts are never sent to model fine-tuning. They appear only in per-request prompts and are not retained by the LLM provider beyond the request.
+**no training on user data** — the system uses a frozen LLM via API. user facts appear only in per-request prompts. they are not retained by the model provider beyond the request window and are never used for fine-tuning.
 
-4. **Audit trail**: Every fact has `conversation_id`, `created_at`, and `source` (user_stated vs inferred). A user can request an export of all stored facts about them, trace each fact to the conversation where it was extracted, and request selective deletion.
+**audit trail** — every fact has `conversation_id`, `created_at`, and `source`. a user can ask: what do you know about me, where did you learn it, when. each fact traces to the turn where it was extracted. selective deletion — "forget that i told you about X" — is a `status = retracted` update on specific fact IDs, not a full reset.
 
-5. **Right to be forgotten**: The `reset()` method provides full deletion. For selective deletion ("forget that I told you about X"), the memory manager can mark specific facts as `retracted` (soft delete) or permanently remove them (hard delete). The current implementation supports both.
+**right to be forgotten** — `reset()` is full deletion. selective deletion is soft (`retracted`) or hard (`DELETE`). both are implemented. if a user says "forget everything," it's immediate. if they say "forget what i said about my weight," the extractor identifies the predicate, the manager retracts the relevant facts, and the next turn acts as if that information was never shared.
+
+---
+
+##
+
+the system as built is not production-ready. it's production-shaped. the data model is right. the isolation guarantees are real. the deletion story is clean. the migration path to PostgreSQL and a managed vector store is clear and low-risk.
+
+what it's missing for actual production: fire-and-forget extraction, model tiering, prompt caching, a proper observability pipeline, and the fact DAG for retrieval quality at scale. none of these are architectural rewrites. they're the next layer on top of a foundation that was built to support them.
+
+
